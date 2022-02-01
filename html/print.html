@@ -413,6 +413,10 @@ Here, we use <code>tedge mqtt pub</code> a raw Cumulocity SmartRest message to b
 <p>To check that this message has been received by Cumulocity,
 navigate to &quot;Device Management/Devices/All devices/&lt;your device id&gt;/Measurements&quot;.
 You should observe a &quot;temperature measurement&quot; graph with the new data point.</p>
+<h2 id="configuring-custom-device-data"><a class="header" href="#configuring-custom-device-data">Configuring custom device data</a></h2>
+<p>You can configure the device data panel in the Cumulocity UI to display information specific to your device.
+To do so, create an <code>inventory.json</code> json file under <code>/etc/tedge/device</code>.
+<em>Note</em>: that you must ensure that this file can be read by the <code>tedge-mapper</code> user group.</p>
 <h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
 <p>You can now:</p>
 <ul>
@@ -1760,6 +1764,10 @@ Caused by:
 <p><code>tedge mqtt pub</code> supports setting of QoS for MQTT messages:</p>
 <pre><code class="language-shell">tedge mqtt pub 'tedge/measurements' '{ &quot;temperature&quot;: 21.3 }' --qos 2
 </code></pre>
+<p><code>tedge mqtt pub</code> supports publishing a MQTT message with retain flag:</p>
+<pre><code class="language-shell">tedge mqtt pub --retain --qos 1 tedge/alarms/critical/high_temperature '{&quot;message&quot;: &quot;Temperature is critical&quot;}'
+</code></pre>
+<p>Note: By default the mqtt message will be published with retain flag set to false.</p>
 <h2 id="subscribe"><a class="header" href="#subscribe">Subscribe</a></h2>
 <p>Command <a href="howto-guides/../references/tedge-mqtt.html"><code>tedge mqtt sub</code></a> can be used to ease debugging of of MQTT communication on local bridge. You can subscribe to topic of your choosing:</p>
 <pre><code class="language-shell">tedge mqtt sub tedge/errors
