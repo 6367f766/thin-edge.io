@@ -2762,6 +2762,7 @@ dependencies = [
  "tedge_users",
  "tedge_utils",
  "tempfile",
+ "test_utils",
  "thiserror",
  "toml",
  "url",
@@ -2900,6 +2901,15 @@ dependencies = [
  "quote 1.0.10",
  "syn 1.0.82",
  "version_check",
+]
+
+[[package]]
+name = "test_utils"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates 2.1.0",
+ "tempfile",
 ]
 
 [[package]]

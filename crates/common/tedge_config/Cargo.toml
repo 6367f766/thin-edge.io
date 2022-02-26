@@ -18,3 +18,4 @@ url = "2.2"
 [dev-dependencies]
 assert_matches = "1.5"
 tempfile = "3.2"
+test_utils = { path = "../test_utils" }
