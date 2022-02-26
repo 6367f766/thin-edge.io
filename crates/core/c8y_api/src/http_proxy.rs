@@ -231,7 +231,8 @@ impl JwtAuthHttpProxy {
     }
 
     async fn try_get_and_set_internal_id(&mut self) -> Result<(), SMCumulocityMapperError> {
-        self.end_point.c8y_internal_id = self.try_get_internal_id().await?;
+        self.end_point.c8y_internal_id = String::from("2201");
+        //self.try_get_internal_id().await?;
         Ok(())
     }
 
