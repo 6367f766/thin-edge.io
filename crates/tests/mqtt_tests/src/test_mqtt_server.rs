@@ -10,11 +10,17 @@ use once_cell::sync::Lazy;
 use rumqttc::QoS;
 
 const MQTT_TEST_PORT: u16 = 55555;
+const MQTT_TEST_PORT_1883: u16 = 1883;
 
 static SERVER: Lazy<MqttProcessHandler> = Lazy::new(|| MqttProcessHandler::new(MQTT_TEST_PORT));
+static SERVER_1883: Lazy<MqttProcessHandler> =
+    Lazy::new(|| MqttProcessHandler::new(MQTT_TEST_PORT_1883));
 
 pub fn test_mqtt_broker() -> &'static MqttProcessHandler {
     Lazy::force(&SERVER)
+}
+pub fn test_mqtt_broker_1883() -> &'static MqttProcessHandler {
+    Lazy::force(&SERVER_1883)
 }
 
 pub struct MqttProcessHandler {
