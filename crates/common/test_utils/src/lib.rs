@@ -123,7 +123,7 @@ fn tedge_cert_create(directory_path: &str) {
     let () = tedge_config_set!("c8y.root.cert.path" cert directory_path);
 
     let mut cmd = Command::cargo_bin(path).unwrap();
-    //cmd.env("C8YPASS", "CsiqG9s25z//");
+ 
     //cmd.env("C8YUSERNAME", "octocat");
     cmd.args([
         "--config-dir",
