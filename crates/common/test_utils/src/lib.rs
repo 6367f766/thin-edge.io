@@ -140,7 +140,6 @@ fn tedge_cert_create(directory_path: &str) {
     thread::sleep(ten_millis);
 
     let mut cmd = Command::cargo_bin(path).unwrap();
-    //cmd.env("C8YPASS", "CsiqG9s25z//");
     //cmd.env("C8YUSERNAME", "octocat");
     cmd.args(["--config-dir", directory_path, "config", "list", "--all"]);
 
