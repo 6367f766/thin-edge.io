@@ -301,9 +301,7 @@ impl SmAgent {
 
         self.process_pending_operation(&mut mqtt.published).await?;
 
-        // TODO: how to break out? the agent should never break out? right?
-        // NOTE: a loop is not required here
-        tokio::select! {
+       tokio::select! {
             Err(error) = self
             .process_subscribed_messages(&mut mqtt.received, &mut mqtt.published, &plugins) => {
                 error!("{}", error);
@@ -311,7 +309,6 @@ impl SmAgent {
             Err(error) = server => {
                 error!("{}", error);
             }
-
         };
         Ok(())
     }
