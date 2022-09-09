@@ -1,14 +1,14 @@
 use futures::StreamExt;
-use hyper::{server::conn::AddrIncoming, Request};
-use hyper::{Body, Response, Server};
+use hyper::{server::conn::AddrIncoming, Body, Request, Response, Server};
 use routerify::{Router, RouterService};
-use std::{io::Write, path::Path};
+use std::path::Path;
 use std::{net::SocketAddr, path::PathBuf};
 
 use tedge_utils::paths::create_directories;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::error::AgentError;
+use crate::error::FileTransferError;
+
 const FILE_TRANSFER_HTTP_ENDPOINT: &str = "/tedge/*";
 
 fn separate_path_and_file_name(input: &str) -> Option<(PathBuf, &str)> {
@@ -21,10 +21,21 @@ fn separate_path_and_file_name(input: &str) -> Option<(PathBuf, &str)> {
     Some((relative_path, file_name))
 }
 
-async fn put(mut request: Request<Body>, root_path: &str) -> Result<Response<Body>, AgentError> {
-    let uri = request.uri().to_string();
+fn remove_prefix_from_uri(uri: String) -> Option<String> {
+    Some(uri.strip_prefix("/tedge")?.to_string())
+}
+
+async fn put(
+    mut request: Request<Body>,
+    root_path: &str,
+) -> Result<Response<Body>, FileTransferError> {
+    let uri =
+        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
+            uri: request.uri().to_owned(),
+        })?;
+
     let mut response = Response::new(Body::empty());
-    dbg!(&uri);
+
     if let Some((relative_path, file_name)) = separate_path_and_file_name(&uri) {
         let root_path = PathBuf::from(root_path);
         let directories_path = root_path.join(relative_path);
@@ -49,8 +60,12 @@ async fn put(mut request: Request<Body>, root_path: &str) -> Result<Response<Bod
     Ok(response)
 }
 
-async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, AgentError> {
-    let full_path = PathBuf::from(format!("{}{}", root_path, request.uri()));
+async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, FileTransferError> {
+    let uri =
+        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
+            uri: request.uri().to_owned(),
+        })?;
+    let full_path = PathBuf::from(format!("{}{}", root_path, uri));
     dbg!("get path", &full_path);
     if !full_path.exists() || full_path.is_dir() {
         let mut response = Response::new(Body::empty());
@@ -68,8 +83,15 @@ async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, 
     Ok(Response::new(Body::from(output)))
 }
 
-async fn delete(request: Request<Body>, root_path: &str) -> Result<Response<Body>, AgentError> {
-    let full_path = PathBuf::from(format!("{}{}", root_path, request.uri()));
+async fn delete(
+    request: Request<Body>,
+    root_path: &str,
+) -> Result<Response<Body>, FileTransferError> {
+    let uri =
+        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
+            uri: request.uri().to_owned(),
+        })?;
+    let full_path = PathBuf::from(format!("{}{}", root_path, uri));
 
     let mut response = Response::new(Body::empty());
 
@@ -95,12 +117,12 @@ async fn delete(request: Request<Body>, root_path: &str) -> Result<Response<Body
 
 async fn stream_request_body_to_path(
     path: &Path,
-    body_stream: &mut Body,
-) -> Result<(), AgentError> {
-    let mut buffer = std::fs::File::create(path)?;
+    body_stream: &mut hyper::Body,
+) -> Result<(), FileTransferError> {
+    let mut buffer = tokio::fs::File::create(path).await?;
     while let Some(data) = body_stream.next().await {
         let data = data?;
-        let _bytes_written = buffer.write(&data)?;
+        let _bytes_written = buffer.write(&data).await?;
     }
     Ok(())
 }
@@ -108,44 +130,45 @@ async fn stream_request_body_to_path(
 pub fn http_file_transfer_server(
     bind_address: &str,
     root_path: &'static str,
-) -> Server<AddrIncoming, RouterService<Body, AgentError>> {
-    // TODO: error handling
-    // Not sure what the best way to handle unwraps here is.
-    if let Ok(router) = Router::builder()
+) -> Result<Server<AddrIncoming, RouterService<hyper::Body, FileTransferError>>, FileTransferError>
+{
+    let router = Router::builder()
         .get(FILE_TRANSFER_HTTP_ENDPOINT, |req| get(req, root_path))
         .put(FILE_TRANSFER_HTTP_ENDPOINT, |req| put(req, root_path))
         .delete(FILE_TRANSFER_HTTP_ENDPOINT, |req| delete(req, root_path))
-        .build()
-    {
-        let router_service = RouterService::new(router).unwrap();
+        .build()?;
+    let router_service = RouterService::new(router)?;
 
-        let mut addr: SocketAddr = bind_address.parse().unwrap();
-        addr.set_port(3000);
+    let mut addr: SocketAddr = bind_address.parse()?;
+    addr.set_port(3000);
 
-        Server::bind(&addr).serve(router_service)
-    } else {
-        todo!()
-    }
+    Ok(Server::bind(&addr).serve(router_service))
 }
 
 #[cfg(test)]
 mod test {
 
-    use super::{http_file_transfer_server, separate_path_and_file_name};
-    use crate::error::AgentError;
+    use super::{http_file_transfer_server, remove_prefix_from_uri, separate_path_and_file_name};
+    use crate::error::FileTransferError;
     use hyper::{server::conn::AddrIncoming, Body, Method, Request, Server};
-    use lazy_static::lazy_static;
     use routerify::RouterService;
     use tedge_test_utils::fs::TempTedgeDir;
+    use test_case::test_case;
 
-    #[rstest::rstest]
-    #[case("/tedge", "", "tedge")]
-    #[case("/tedge/some/dir/file", "tedge/some/dir", "file")]
-    #[case("/tedge/some/dir/", "tedge/some/dir", "")]
+    #[test_case("/tedge/some/dir/file", Some(String::from("/some/dir/file")))]
+    #[test_case("/wrong/some/dir/file", None)]
+    fn test_remove_prefix_from_uri(input: &str, output: Option<String>) {
+        let actual_output = remove_prefix_from_uri(input.to_string());
+        assert_eq!(actual_output, output);
+    }
+
+    #[test_case("/tedge", "", "tedge")]
+    #[test_case("/tedge/some/dir/file", "tedge/some/dir", "file")]
+    #[test_case("/tedge/some/dir/", "tedge/some/dir", "")]
     fn test_separate_path_and_file_name(
-        #[case] input: &str,
-        #[case] expected_path: &str,
-        #[case] expected_file_name: &str,
+        input: &str,
+        expected_path: &str,
+        expected_file_name: &str,
     ) {
         let (actual_path, actual_file_name) = separate_path_and_file_name(input).unwrap();
         assert_eq!(actual_path, std::path::PathBuf::from(expected_path));
@@ -155,73 +178,46 @@ mod test {
     const VALID_TEST_URI: &'static str = "http://127.0.0.1:3000/tedge/another/dir/test-file";
     const INVALID_TEST_URI: &'static str = "http://127.0.0.1:3000/wrong/place/test-file";
 
-    #[rstest::rstest]
-    #[case(VALID_TEST_URI, hyper::StatusCode::OK)]
-    #[case(INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)]
-    #[tokio::test]
+    #[test_case(hyper::Method::GET, VALID_TEST_URI, hyper::StatusCode::OK)]
+    #[test_case(hyper::Method::GET, INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)]
+    #[test_case(hyper::Method::DELETE, VALID_TEST_URI, hyper::StatusCode::ACCEPTED)]
+    #[test_case(hyper::Method::DELETE, INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)]
     #[serial_test::serial]
-    async fn test_file_transfer_get(
-        #[case] uri: &'static str,
-        #[case] status_code: hyper::StatusCode,
-    ) {
-        let client_handler = tokio::spawn(async move {
-            let client = hyper::Client::new();
-            let response = client.get(hyper::Uri::from_static(uri)).await.unwrap();
-            response
-        });
-
-        let (_ttd, server) = server_fixture().await;
-        tokio::select! {
-            _out = server => {
-            }
-            Ok(response) = client_handler => {
-                assert_eq!(response.status(), status_code);
-            }
-        };
-    }
-
-    #[rstest::rstest]
-    #[case(VALID_TEST_URI, hyper::StatusCode::ACCEPTED)]
-    #[case(INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)]
     #[tokio::test]
-    #[serial_test::serial]
-    async fn test_file_transfer_delete(
-        #[case] uri: &'static str,
-        #[case] status_code: hyper::StatusCode,
+    async fn test_file_transfer_http_methods(
+        method: hyper::Method,
+        uri: &'static str,
+        status_code: hyper::StatusCode,
     ) {
+        let (_ttd, server) = server();
+        let client_put_request = client_put_request().await;
+
         let client_handler = tokio::spawn(async move {
             let client = hyper::Client::new();
 
             let req = Request::builder()
-                .method(Method::DELETE)
+                .method(method)
                 .uri(uri)
                 .body(Body::empty())
                 .expect("request builder");
             client.request(req).await.unwrap()
         });
 
-        let (_ttd, server) = server_fixture().await;
         tokio::select! {
-            _out = server => {
-            }
-            Ok(response) = client_handler => {
-                //dbg!(std::path::PathBuf::from(&TMPPATH.clone()).join("tedge/another/dir/test-file").exists());
+            Err(_) = server => {}
+            Ok(_put_response) = client_put_request => {
+                let response = client_handler.await.unwrap();
                 assert_eq!(response.status(), status_code);
             }
-
-        };
+        }
     }
 
-    #[rstest::rstest]
-    #[case(VALID_TEST_URI, hyper::StatusCode::CREATED)]
-    #[case(INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)] // TODO what about 403
-    #[tokio::test]
+    #[test_case(VALID_TEST_URI, hyper::StatusCode::CREATED)]
+    #[test_case(INVALID_TEST_URI, hyper::StatusCode::NOT_FOUND)] // TODO what about 403
     #[serial_test::serial]
-    async fn test_file_transfer_put(
-        #[case] uri: &'static str,
-        #[case] status_code: hyper::StatusCode,
-    ) {
-        let put_request_handler = tokio::spawn(async move {
+    #[tokio::test]
+    async fn test_file_transfer_put(uri: &'static str, status_code: hyper::StatusCode) {
+        let client_put_request = tokio::spawn(async move {
             let client = hyper::Client::new();
 
             let mut string = String::new();
@@ -237,66 +233,43 @@ mod test {
             response
         });
 
-        let (_ttd, server) = server_fixture().await;
+        let (_ttd, server) = server();
 
         tokio::select! {
-            _out = server => {
+            Err(_) = server => {
             }
-            Ok(_put_response) = put_request_handler => {
+            Ok(_put_response) = client_put_request => {
                 assert_eq!(_put_response.status(), status_code);
             }
         }
     }
 
-    #[rstest::fixture]
-    async fn get_request_fixture() -> hyper::Response<Body> {
-        let client = hyper::Client::new();
-        let request = client
-            .get(hyper::Uri::from_static(VALID_TEST_URI))
-            .await
-            .unwrap();
-        request
-    }
-
-    async fn server_fixture() -> (
+    fn server() -> (
         TempTedgeDir,
-        Server<AddrIncoming, RouterService<Body, AgentError>>,
+        Server<AddrIncoming, RouterService<Body, FileTransferError>>,
     ) {
-        lazy_static! {
-            static ref TTD: TempTedgeDir = {
-                let ttd = TempTedgeDir::new();
-                let file = ttd.dir("tedge").dir("another").dir("dir").file("test-file");
-                file.with_raw_content("raw content");
-                ttd
-            };
-            static ref TMPPATH: String = {
-                let tempdir_path = String::from(TTD.path().to_str().unwrap());
-                tempdir_path
-            };
-        }
-
         let ttd = TempTedgeDir::new();
-        let file = ttd.dir("tedge").dir("another").dir("dir").file("test-file");
-        file.with_raw_content("raw content");
         let tempdir_path = String::from(ttd.path().to_str().unwrap());
         let leaked: &'static str = Box::leak(tempdir_path.into_boxed_str());
-        (ttd, http_file_transfer_server("127.0.0.1:3000", &leaked))
+        let server = http_file_transfer_server("127.0.0.1:3000", &leaked).unwrap();
+        (ttd, server)
     }
 
-    #[rstest::fixture]
-    async fn put_request_fixture() -> hyper::client::ResponseFuture {
-        let client = hyper::Client::new();
+    // canonicalised client PUT request to create a file in `VALID_TEST_URI`
+    // this is to be used to test the GET and DELETE methods.
+    async fn client_put_request() -> tokio::task::JoinHandle<hyper::Response<Body>> {
+        let handle = tokio::spawn(async move {
+            let client = hyper::Client::new();
 
-        let mut string = String::new();
-        for val in 0..100 {
-            string.push_str(&format!("{}\n", val));
-        }
-        let req = Request::builder()
-            .method(Method::PUT)
-            .uri(VALID_TEST_URI)
-            .body(Body::from(string.clone()))
-            .expect("request builder");
-        //let out = client.request(req).await.unwrap();
-        client.request(req)
+            let string = String::from("file transfer server");
+
+            let req = Request::builder()
+                .method(Method::PUT)
+                .uri(VALID_TEST_URI)
+                .body(Body::from(string.clone()))
+                .expect("request builder");
+            client.request(req).await.unwrap()
+        });
+        handle
     }
 }

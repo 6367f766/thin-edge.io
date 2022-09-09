@@ -55,7 +55,7 @@ async-stream = "0.3"
 once_cell = "1.8"
 mqtt_tests = { path = "../../tests/mqtt_tests" }
 predicates = "2.1"
-rstest = "0.15"
+test-case = "2.2"
 tedge_utils = { path = "../../common/tedge_utils"}
 tedge_test_utils = { path = "../../tests/tedge_test_utils"}
 tokio-test = "0.4"
