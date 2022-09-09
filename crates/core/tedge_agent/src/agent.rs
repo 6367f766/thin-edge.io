@@ -275,7 +275,7 @@ impl SmAgent {
         let server = http_rest::http_file_transfer_server(
             &self.config.bind_address,
             FILE_TRANSFER_ROOT_PATH,
-        );
+        )?;
 
         let plugins = Arc::new(Mutex::new(ExternalPlugins::open(
             &sm_plugins_path,
@@ -301,15 +301,19 @@ impl SmAgent {
 
         self.process_pending_operation(&mut mqtt.published).await?;
 
-       tokio::select! {
-            Err(error) = self
-            .process_subscribed_messages(&mut mqtt.received, &mut mqtt.published, &plugins) => {
-                error!("{}", error);
+        // spawning file transfer server
+        tokio::spawn(async move {
+            if let Err(err) = server.await {
+                error!("{}", err);
             }
-            Err(error) = server => {
-                error!("{}", error);
-            }
-        };
+        });
+
+        while let Err(error) = self
+            .process_subscribed_messages(&mut mqtt.received, &mut mqtt.published, &plugins)
+            .await
+        {
+            error!("{}", error);
+        }
         Ok(())
     }
 
