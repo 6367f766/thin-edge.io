@@ -53,14 +53,30 @@ pub enum AgentError {
     #[error(transparent)]
     FromOperationsLogs(#[from] plugin_sm::operation_logs::OperationLogsError),
 
-    #[error(transparent)]
-    FromInfallible(#[from] std::convert::Infallible),
 
     #[error(transparent)]
-    FromUtf8Error(#[from] std::string::FromUtf8Error),
+    FromFileTransferError(#[from] FileTransferError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FileTransferError {
+    #[error(transparent)]
+    FromIo(#[from] std::io::Error),
 
     #[error(transparent)]
     FromHyperError(#[from] hyper::Error),
+
+    #[error("Invalid URI: {uri:?}")]
+    InvalidURI { uri: hyper::Uri },
+
+    #[error(transparent)]
+    FromRouterServer(#[from] routerify::RouteError),
+
+    #[error(transparent)]
+    FromAddressParseError(#[from] std::net::AddrParseError),
+
+    #[error(transparent)]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
 }
 
 #[derive(Debug, thiserror::Error)]
