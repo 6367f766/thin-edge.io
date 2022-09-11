@@ -32,7 +32,7 @@ use thin_edge_json::health::{health_check_topics, send_health_status};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, instrument, warn};
 
-const FILE_TRANSFER_ROOT_PATH: &str = "/var/tedge/file-transfer";
+pub const FILE_TRANSFER_ROOT_PATH: &str = "/var/tedge/file-transfer";
 const SM_PLUGINS: &str = "sm-plugins";
 const AGENT_LOG_PATH: &str = "tedge/agent";
 

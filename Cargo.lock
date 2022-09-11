@@ -2832,6 +2832,7 @@ dependencies = [
  "flockfile",
  "futures",
  "futures-util",
+ "glob",
  "hyper",
  "lazy_static",
  "mqtt_channel",

@@ -53,7 +53,6 @@ pub enum AgentError {
     #[error(transparent)]
     FromOperationsLogs(#[from] plugin_sm::operation_logs::OperationLogsError),
 
-
     #[error(transparent)]
     FromFileTransferError(#[from] FileTransferError),
 }
@@ -66,8 +65,8 @@ pub enum FileTransferError {
     #[error(transparent)]
     FromHyperError(#[from] hyper::Error),
 
-    #[error("Invalid URI: {uri:?}")]
-    InvalidURI { uri: hyper::Uri },
+    #[error("Invalid URI: {value:?}")]
+    InvalidURI { value: String },
 
     #[error(transparent)]
     FromRouterServer(#[from] routerify::RouteError),

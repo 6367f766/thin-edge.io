@@ -11,32 +11,66 @@ use crate::error::FileTransferError;
 
 const FILE_TRANSFER_HTTP_ENDPOINT: &str = "/tedge/*";
 
-fn separate_path_and_file_name(input: &str) -> Option<(PathBuf, &str)> {
-    let (mut relative_path, file_name) = input.rsplit_once('/')?;
+mod uri_utils {
+    // below are a set of utility function used for working with
+    // URI coming from GET, PUT and DELETE requests to the thin-edge
+    // device.
+    use crate::error::FileTransferError;
+    use std::path::PathBuf;
 
-    if relative_path.starts_with('/') {
-        relative_path = &relative_path[1..];
+    pub fn separate_path_and_file_name(input: PathBuf) -> Option<(PathBuf, String)> {
+        let input_as_str = input.to_str()?;
+        let (mut relative_path, file_name) = input_as_str.rsplit_once('/')?;
+
+        if relative_path.starts_with('/') {
+            relative_path = &relative_path[1..];
+        }
+        let relative_path = PathBuf::from(relative_path);
+        Some((relative_path, file_name.into()))
     }
-    let relative_path = PathBuf::from(relative_path);
-    Some((relative_path, file_name))
-}
 
-fn remove_prefix_from_uri(uri: String) -> Option<String> {
-    Some(uri.strip_prefix("/tedge")?.to_string())
+    pub fn remove_prefix_from_uri(uri: String) -> Option<String> {
+        Some(uri.strip_prefix("/tedge")?.to_string())
+    }
+
+    // checks if canonicalised URI path starts_with `FILE_TRANSFER_ROOT_PATH`
+    pub fn verify_uri(path: &PathBuf, root_path: &str) -> Result<PathBuf, FileTransferError> {
+        let http_transfer_root_path = PathBuf::from(root_path);
+        dbg!(&path);
+        // TODO: cannot canonicalise what does not exist!
+        let path = path.canonicalize()?;
+        dbg!(&path);
+        if path.starts_with(http_transfer_root_path) {
+            Ok(path)
+        } else {
+            Err(FileTransferError::InvalidURI {
+                value: path.to_string_lossy().to_string(),
+            })
+        }
+    }
 }
 
 async fn put(
     mut request: Request<Body>,
     root_path: &str,
 ) -> Result<Response<Body>, FileTransferError> {
-    let uri =
-        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
-            uri: request.uri().to_owned(),
-        })?;
+    dbg!(&root_path);
+    let uri = uri_utils::remove_prefix_from_uri(request.uri().to_string()).ok_or(
+        FileTransferError::InvalidURI {
+            value: request.uri().to_string(),
+        },
+    )?;
+    dbg!(&uri);
+
+    let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
+    dbg!(&full_path);
+    full_path = uri_utils::verify_uri(&full_path, root_path)?;
+    dbg!("put request", &full_path);
 
     let mut response = Response::new(Body::empty());
 
-    if let Some((relative_path, file_name)) = separate_path_and_file_name(&uri) {
+    if let Some((relative_path, file_name)) = uri_utils::separate_path_and_file_name(full_path) {
+        dbg!(&relative_path, &file_name);
         let root_path = PathBuf::from(root_path);
         let directories_path = root_path.join(relative_path);
 
@@ -61,12 +95,15 @@ async fn put(
 }
 
 async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, FileTransferError> {
-    let uri =
-        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
-            uri: request.uri().to_owned(),
-        })?;
-    let full_path = PathBuf::from(format!("{}{}", root_path, uri));
-    dbg!("get path", &full_path);
+    let uri = uri_utils::remove_prefix_from_uri(request.uri().to_string()).ok_or(
+        FileTransferError::InvalidURI {
+            value: request.uri().to_string(),
+        },
+    )?;
+
+    let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
+    full_path = uri_utils::verify_uri(&full_path, root_path)?;
+
     if !full_path.exists() || full_path.is_dir() {
         let mut response = Response::new(Body::empty());
         *response.status_mut() = hyper::StatusCode::NOT_FOUND;
@@ -87,15 +124,15 @@ async fn delete(
     request: Request<Body>,
     root_path: &str,
 ) -> Result<Response<Body>, FileTransferError> {
-    let uri =
-        remove_prefix_from_uri(request.uri().to_string()).ok_or(FileTransferError::InvalidURI {
-            uri: request.uri().to_owned(),
-        })?;
-    let full_path = PathBuf::from(format!("{}{}", root_path, uri));
+    let uri = uri_utils::remove_prefix_from_uri(request.uri().to_string()).ok_or(
+        FileTransferError::InvalidURI {
+            value: request.uri().to_string(),
+        },
+    )?;
+    let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
+    full_path = uri_utils::verify_uri(&full_path, root_path)?;
 
     let mut response = Response::new(Body::empty());
-
-    dbg!("delete full path", &full_path);
 
     if !full_path.exists() {
         dbg!("full_path did not exist");
@@ -148,7 +185,12 @@ pub fn http_file_transfer_server(
 #[cfg(test)]
 mod test {
 
-    use super::{http_file_transfer_server, remove_prefix_from_uri, separate_path_and_file_name};
+    use std::path::PathBuf;
+
+    use super::{
+        http_file_transfer_server,
+        uri_utils::{remove_prefix_from_uri, separate_path_and_file_name, verify_uri},
+    };
     use crate::error::FileTransferError;
     use hyper::{server::conn::AddrIncoming, Body, Method, Request, Server};
     use routerify::RouterService;
@@ -170,7 +212,7 @@ mod test {
         expected_path: &str,
         expected_file_name: &str,
     ) {
-        let (actual_path, actual_file_name) = separate_path_and_file_name(input).unwrap();
+        let (actual_path, actual_file_name) = separate_path_and_file_name(input.into()).unwrap();
         assert_eq!(actual_path, std::path::PathBuf::from(expected_path));
         assert_eq!(actual_file_name, expected_file_name);
     }
@@ -239,6 +281,7 @@ mod test {
             Err(_) = server => {
             }
             Ok(_put_response) = client_put_request => {
+                dbg!(_put_response.status());
                 assert_eq!(_put_response.status(), status_code);
             }
         }
@@ -271,5 +314,14 @@ mod test {
             client.request(req).await.unwrap()
         });
         handle
+    }
+
+    #[test_case(
+        PathBuf::from("/var/tedge/file-transfer/../../../bin/sh"),
+        "/var/tedge/file-transfer"
+    )]
+    fn test_verify_uri(path: PathBuf, root_path: &str) {
+        let res = verify_uri(&path, root_path);
+        assert!(res.is_err());
     }
 }
