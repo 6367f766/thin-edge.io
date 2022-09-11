@@ -16,15 +16,13 @@ mod uri_utils {
     // URI coming from GET, PUT and DELETE requests to the thin-edge
     // device.
     use crate::error::FileTransferError;
+    use path_clean::PathClean;
     use std::path::PathBuf;
 
     pub fn separate_path_and_file_name(input: PathBuf) -> Option<(PathBuf, String)> {
         let input_as_str = input.to_str()?;
-        let (mut relative_path, file_name) = input_as_str.rsplit_once('/')?;
+        let (relative_path, file_name) = input_as_str.rsplit_once('/')?;
 
-        if relative_path.starts_with('/') {
-            relative_path = &relative_path[1..];
-        }
         let relative_path = PathBuf::from(relative_path);
         Some((relative_path, file_name.into()))
     }
@@ -36,10 +34,7 @@ mod uri_utils {
     // checks if canonicalised URI path starts_with `FILE_TRANSFER_ROOT_PATH`
     pub fn verify_uri(path: &PathBuf, root_path: &str) -> Result<PathBuf, FileTransferError> {
         let http_transfer_root_path = PathBuf::from(root_path);
-        dbg!(&path);
-        // TODO: cannot canonicalise what does not exist!
-        let path = path.canonicalize()?;
-        dbg!(&path);
+        let path = path.clean();
         if path.starts_with(http_transfer_root_path) {
             Ok(path)
         } else {
@@ -60,10 +55,8 @@ async fn put(
             value: request.uri().to_string(),
         },
     )?;
-    dbg!(&uri);
 
     let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
-    dbg!(&full_path);
     full_path = uri_utils::verify_uri(&full_path, root_path)?;
     dbg!("put request", &full_path);
 
@@ -131,6 +124,7 @@ async fn delete(
     )?;
     let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
     full_path = uri_utils::verify_uri(&full_path, root_path)?;
+    dbg!("delete path", &full_path);
 
     let mut response = Response::new(Body::empty());
 
@@ -204,9 +198,8 @@ mod test {
         assert_eq!(actual_output, output);
     }
 
-    #[test_case("/tedge", "", "tedge")]
-    #[test_case("/tedge/some/dir/file", "tedge/some/dir", "file")]
-    #[test_case("/tedge/some/dir/", "tedge/some/dir", "")]
+    #[test_case("/tedge/some/dir/file", "/tedge/some/dir", "file")]
+    #[test_case("/tedge/some/dir/", "/tedge/some/dir", "")]
     fn test_separate_path_and_file_name(
         input: &str,
         expected_path: &str,
@@ -315,13 +308,25 @@ mod test {
         });
         handle
     }
-
     #[test_case(
         PathBuf::from("/var/tedge/file-transfer/../../../bin/sh"),
-        "/var/tedge/file-transfer"
+        "/var/tedge/file-transfer",
+        false
     )]
-    fn test_verify_uri(path: PathBuf, root_path: &str) {
+    #[test_case(
+        PathBuf::from("/var/tedge/file-transfer/../file-transfer/new/dir/file"),
+        "/var/tedge/file-transfer",
+        true
+    )]
+    fn test_verify_uri(path: PathBuf, root_path: &str, is_ok: bool) {
         let res = verify_uri(&path, root_path);
-        assert!(res.is_err());
+        match is_ok {
+            true => {
+                assert!(res.is_ok());
+            }
+            false => {
+                assert!(res.is_err());
+            }
+        }
     }
 }
