@@ -49,7 +49,6 @@ async fn put(
     mut request: Request<Body>,
     root_path: &str,
 ) -> Result<Response<Body>, FileTransferError> {
-    dbg!(&root_path);
     let uri = uri_utils::remove_prefix_from_uri(request.uri().to_string()).ok_or(
         FileTransferError::InvalidURI {
             value: request.uri().to_string(),
@@ -58,12 +57,10 @@ async fn put(
 
     let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
     full_path = uri_utils::verify_uri(&full_path, root_path)?;
-    dbg!("put request", &full_path);
 
     let mut response = Response::new(Body::empty());
 
     if let Some((relative_path, file_name)) = uri_utils::separate_path_and_file_name(full_path) {
-        dbg!(&relative_path, &file_name);
         let root_path = PathBuf::from(root_path);
         let directories_path = root_path.join(relative_path);
 
@@ -124,12 +121,10 @@ async fn delete(
     )?;
     let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
     full_path = uri_utils::verify_uri(&full_path, root_path)?;
-    dbg!("delete path", &full_path);
 
     let mut response = Response::new(Body::empty());
 
     if !full_path.exists() {
-        dbg!("full_path did not exist");
         *response.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
         Ok(response)
     } else {
@@ -274,7 +269,6 @@ mod test {
             Err(_) = server => {
             }
             Ok(_put_response) = client_put_request => {
-                dbg!(_put_response.status());
                 assert_eq!(_put_response.status(), status_code);
             }
         }
