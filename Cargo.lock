@@ -459,7 +459,6 @@ dependencies = [
  "mqtt_channel",
  "reqwest",
  "serde",
- "serde_json",
  "tedge_config",
  "tempfile",
  "test-case",

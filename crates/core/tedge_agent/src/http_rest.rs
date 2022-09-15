@@ -85,6 +85,7 @@ async fn put(
 }
 
 async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, FileTransferError> {
+    dbg!("get request", &request.uri());
     let uri = uri_utils::remove_prefix_from_uri(request.uri().to_string()).ok_or(
         FileTransferError::InvalidURI {
             value: request.uri().to_string(),
@@ -92,7 +93,9 @@ async fn get(request: Request<Body>, root_path: &str) -> Result<Response<Body>, 
     )?;
 
     let mut full_path = PathBuf::from(format!("{}{}", root_path, uri));
+    dbg!(&full_path);
     full_path = uri_utils::verify_uri(&full_path, root_path)?;
+    dbg!(&full_path);
 
     if !full_path.exists() || full_path.is_dir() {
         let mut response = Response::new(Body::empty());
