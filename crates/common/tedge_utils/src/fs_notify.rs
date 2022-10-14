@@ -9,7 +9,7 @@ use async_stream::try_stream;
 pub use futures::{pin_mut, Stream, StreamExt};
 use inotify::{Event, EventMask, Inotify, WatchMask};
 use nix::libc::c_int;
-use notify::Op;
+//use notify::Op;
 use strum_macros::Display;
 use try_traits::default::TryDefault;
 
@@ -19,15 +19,28 @@ pub enum FileEvent {
     Deleted,
     Created,
 }
-impl From<FileEvent> for Op {
-    fn from(value: FileEvent) -> Self {
-        match value {
-            FileEvent::Modified => Op::CLOSE_WRITE,
-            FileEvent::Deleted => Op::REMOVE,
-            FileEvent::Created => Op::CREATE,
-        }
-    }
-}
+//impl From<FileEvent> for Op {
+//    fn from(value: FileEvent) -> Self {
+//        match value {
+//            FileEvent::Modified => Op::CLOSE_WRITE,
+//            FileEvent::Deleted => Op::REMOVE,
+//            FileEvent::Created => Op::CREATE,
+//        }
+//    }
+//}
+
+//impl TryFrom<Op> for FileEvent {
+//    type Error = NotifyStreamError;
+//
+//    fn try_from(value: Op) -> Result<Self, Self::Error> {
+//        match value {
+//            Op::CLOSE_WRITE => Ok(FileEvent::Modified),
+//            Op::REMOVE => Ok(FileEvent::Deleted),
+//            Op::CREATE => Ok(FileEvent::Created),
+//            _ => Err(NotifyStreamError::UnsupportedOp { op: value }),
+//        }
+//    }
+//}
 
 impl From<FileEvent> for WatchMask {
     fn from(value: FileEvent) -> Self {
@@ -35,19 +48,6 @@ impl From<FileEvent> for WatchMask {
             FileEvent::Modified => WatchMask::MODIFY,
             FileEvent::Deleted => WatchMask::DELETE,
             FileEvent::Created => WatchMask::CREATE,
-        }
-    }
-}
-
-impl TryFrom<Op> for FileEvent {
-    type Error = NotifyStreamError;
-
-    fn try_from(value: Op) -> Result<Self, Self::Error> {
-        match value {
-            Op::CLOSE_WRITE => Ok(FileEvent::Modified),
-            Op::REMOVE => Ok(FileEvent::Deleted),
-            Op::CREATE => Ok(FileEvent::Created),
-            _ => Err(NotifyStreamError::UnsupportedOp { op: value }),
         }
     }
 }
