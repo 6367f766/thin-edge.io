@@ -82,8 +82,8 @@ pub enum NotifyStreamError {
     #[error("Unsupported mask: {mask:?}")]
     UnsupportedEventMask { mask: EventMask },
 
-    #[error("Unsupported mask: {op:?}")]
-    UnsupportedOp { op: Op },
+//    #[error("Unsupported mask: {op:?}")]
+//    UnsupportedOp { op: Op },
 
     #[error("Expected watch directory to be: {expected:?} but was: {actual:?}")]
     WrongParentDirectory { expected: PathBuf, actual: PathBuf },

@@ -1,8 +1,100 @@
 #[cfg(test)]
 mod tests {
+    use futures::{
+        channel::mpsc::{channel, Receiver},
+        SinkExt, StreamExt,
+    };
+    use notify::{Config, Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::path::Path;
+    use tedge_test_utils::fs::TempTedgeDir;
+
+    async fn assert_stream(mut stream: Receiver<Result<Event, Error>>) {
+        while let Some(Ok(event)) = stream.next().await {
+            dbg!(event);
+        }
+    }
+
+    #[tokio::test]
+    async fn it_works_with_tokio() -> notify::Result<()> {
+        let ttd = TempTedgeDir::new();
+        dbg!(ttd.path());
+        let dir = ttd.dir("dir_a");
+        let (mut watcher, rx) = async_watcher()?;
+        watcher.watch(dir.path().as_ref(), RecursiveMode::Recursive)?;
+
+        let server_handler = tokio::spawn(async move {
+            assert_stream(rx).await;
+        });
+
+        let handle = tokio::spawn(async move {
+            dbg!("this was called");
+            dir.file("file_a");
+            ttd.dir("new_dir");
+            //let result = watcher.watch(dir_two.path(), RecursiveMode::Recursive);
+            //dbg!(result);
+            //    .unwrap();
+            //dir_two.file("file_b");
+        });
+
+        //let add_watcher = tokio::spawn(async move {
+        //    let path = Path::new("/tmp/my-dir");
+        //    let result = watcher.watch(path.as_ref(), RecursiveMode::Recursive);
+        //    dbg!(result);
+        //});
+
+        server_handler.await.unwrap();
+        handle.await.unwrap();
+        //add_watcher.await.unwrap();
+
+        Ok(())
+    }
+
     #[test]
-    fn it_works() {}
+    fn it_works() {
+        let path = Path::new("/tmp/my-dir");
+        println!("watching {}", path.display());
+        futures::executor::block_on(async {
+            if let Err(e) = async_watch(path).await {
+                println!("error: {:?}", e)
+            }
+        });
+    }
+
+    fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Result<Event>>)> {
+        let (mut tx, rx) = channel(1);
+
+        // Automatically select the best implementation for your platform.
+        // You can also access each implementation directly e.g. INotifyWatcher.
+        let watcher = RecommendedWatcher::new(
+            move |res| {
+                futures::executor::block_on(async {
+                    tx.send(res).await.unwrap();
+                })
+            },
+            Config::default(),
+        )?;
+
+        Ok((watcher, rx))
+    }
+
+    async fn async_watch<P: AsRef<Path>>(path: P) -> notify::Result<()> {
+        let (mut watcher, mut rx) = async_watcher()?;
+
+        // Add a path to be watched. All files and directories at that path and
+        // below will be monitored for changes.
+        watcher.watch(path.as_ref(), RecursiveMode::Recursive)?;
+
+        while let Some(res) = rx.next().await {
+            match res {
+                Ok(event) => println!("changed: {:?}", event),
+                Err(e) => println!("watch error: {:?}", e),
+            }
+        }
+
+        Ok(())
+    }
 }
+
 //use async_stream::try_stream;
 //use futures::Stream;
 //// This crate replaces fs_notify, using the `notify` crate: https://github.com/notify-rs/notify
