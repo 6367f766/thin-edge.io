@@ -4,37 +4,67 @@ mod tests {
         channel::mpsc::{channel, Receiver},
         SinkExt, StreamExt,
     };
-    use notify::{Config, Error, Event, RecommendedWatcher, RecursiveMode, Watcher};
-    use std::path::Path;
+    use notify::{Config, Error, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::{path::PathBuf, sync::Arc};
     use tedge_test_utils::fs::TempTedgeDir;
 
-    async fn assert_stream(mut stream: Receiver<Result<Event, Error>>) {
-        while let Some(Ok(event)) = stream.next().await {
+    use crate::file::create_file_with_user_group;
+
+    async fn assert_stream(mut stream: Receiver<(PathBuf, EventKind)>) {
+        while let Some(event) = stream.next().await {
             dbg!(event);
         }
     }
 
-    #[tokio::test]
+    fn command(command: &str) {
+        let mut cmd = std::process::Command::new(command);
+        cmd.spawn().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn it_works_with_tokio() -> notify::Result<()> {
-        let ttd = TempTedgeDir::new();
+        let ttd = Arc::new(TempTedgeDir::new());
+        let ttd_clone = ttd.clone();
         dbg!(ttd.path());
-        let dir = ttd.dir("dir_a");
-        let (mut watcher, rx) = async_watcher()?;
-        watcher.watch(dir.path().as_ref(), RecursiveMode::Recursive)?;
+        let dir = ttd_clone.dir("dir_a");
+        let (mut watcher, mut rx) = async_watcher()?;
 
-        let server_handler = tokio::spawn(async move {
-            assert_stream(rx).await;
-        });
+        watcher.watch(ttd.path().as_ref(), RecursiveMode::Recursive)?;
 
-        let handle = tokio::spawn(async move {
+        let fs_handle = tokio::spawn(async move {
             dbg!("this was called");
             dir.file("file_a");
-            ttd.dir("new_dir");
-            //let result = watcher.watch(dir_two.path(), RecursiveMode::Recursive);
-            //dbg!(result);
-            //    .unwrap();
-            //dir_two.file("file_b");
+            let new_dir = ttd_clone.dir("new_directory");
+            //std::fs::create_dir(ttd_clone.path().join("new_directory")).unwrap();
+            ttd_clone
+                .dir("new_directory")
+                .file("file_one")
+                .with_raw_content("file content");
+            ttd_clone.dir("new_directory").file("file_bb");
+            dir.file("file_b");
+            dir.file("file_c");
+            new_dir.file("file_aaaaa");
         });
+
+        let stream = tokio::spawn(async move {
+            while let Some(event) = rx.next().await {
+                dbg!(event);
+            }
+        });
+
+        fs_handle.await.unwrap();
+        stream.await.unwrap();
+        //fs_handle.await.unwrap();
+
+        Ok(())
+
+        //loop {
+        //    tokio::select! {
+        //        Some(event) = rx.next() => {
+        //            dbg!(event);
+        //        }
+        //    }
+        //}
 
         //let add_watcher = tokio::spawn(async move {
         //    let path = Path::new("/tmp/my-dir");
@@ -42,57 +72,49 @@ mod tests {
         //    dbg!(result);
         //});
 
-        server_handler.await.unwrap();
-        handle.await.unwrap();
+        //server_handler.await.unwrap();
+        //handle.await.unwrap();
         //add_watcher.await.unwrap();
 
-        Ok(())
+        //Ok(())
     }
 
-    #[test]
-    fn it_works() {
-        let path = Path::new("/tmp/my-dir");
-        println!("watching {}", path.display());
-        futures::executor::block_on(async {
-            if let Err(e) = async_watch(path).await {
-                println!("error: {:?}", e)
-            }
-        });
-    }
-
-    fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<notify::Result<Event>>)> {
-        let (mut tx, rx) = channel(1);
+    fn async_watcher() -> notify::Result<(RecommendedWatcher, Receiver<(PathBuf, EventKind)>)> {
+        let (mut tx, rx) = channel(10);
 
         // Automatically select the best implementation for your platform.
         // You can also access each implementation directly e.g. INotifyWatcher.
         let watcher = RecommendedWatcher::new(
-            move |res| {
+            move |res: Result<Event, Error>| {
                 futures::executor::block_on(async {
-                    tx.send(res).await.unwrap();
+                    let res = res.unwrap();
+                    for path in res.paths {
+                        tx.send((path, res.kind.clone())).await.unwrap();
+                    }
                 })
             },
-            Config::default(),
+            Config::default().with_poll_interval(std::time::Duration::from_millis(10)),
         )?;
 
         Ok((watcher, rx))
     }
 
-    async fn async_watch<P: AsRef<Path>>(path: P) -> notify::Result<()> {
-        let (mut watcher, mut rx) = async_watcher()?;
+    //async fn async_watch<P: AsRef<Path>>(path: P) -> notify::Result<()> {
+    //    let (mut watcher, mut rx) = async_watcher()?;
 
-        // Add a path to be watched. All files and directories at that path and
-        // below will be monitored for changes.
-        watcher.watch(path.as_ref(), RecursiveMode::Recursive)?;
+    //    // Add a path to be watched. All files and directories at that path and
+    //    // below will be monitored for changes.
+    //    watcher.watch(path.as_ref(), RecursiveMode::Recursive)?;
 
-        while let Some(res) = rx.next().await {
-            match res {
-                Ok(event) => println!("changed: {:?}", event),
-                Err(e) => println!("watch error: {:?}", e),
-            }
-        }
+    //    while let Some(res) = rx.next().await {
+    //        match res {
+    //            Ok(event) => println!("changed: {:?}", event),
+    //            Err(e) => println!("watch error: {:?}", e),
+    //        }
+    //    }
 
-        Ok(())
-    }
+    //    Ok(())
+    //}
 }
 
 //use async_stream::try_stream;

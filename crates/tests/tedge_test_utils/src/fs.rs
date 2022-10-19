@@ -50,7 +50,8 @@ impl TempTedgeDir {
         let path = root.join(&self.current_file_path).join(file_name);
 
         if !path.exists() {
-            let _file = fs::File::create(&path).unwrap();
+            let mut file = fs::File::create(&path).unwrap();
+            file.flush().unwrap();
         };
         TempTedgeFile { file_path: path }
     }
