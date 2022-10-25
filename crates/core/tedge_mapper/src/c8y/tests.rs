@@ -79,7 +79,7 @@ async fn mapper_publishes_software_update_request() {
     let cfg_dir = TempTedgeDir::new();
     let (_tmp_dir, sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
     // Prepare and publish a software update smartrest request on `c8y/s/ds`.
-    let smartrest = r#"528,external_id,nodered,1.0.0::debian,,install"#;
+    let smartrest = r#"528,test-device,nodered,1.0.0::debian,,install"#;
     broker.publish("c8y/s/ds", smartrest).await.unwrap();
     publish_a_fake_jwt_token(broker).await;
 
@@ -241,7 +241,7 @@ async fn mapper_fails_during_sw_update_recovers_and_process_response() -> Result
     let (_tmp_dir, sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
 
     // Prepare and publish a software update smartrest request on `c8y/s/ds`.
-    let smartrest = r#"528,external_id,nodered,1.0.0::debian,,install"#;
+    let smartrest = r#"528,test-device,nodered,1.0.0::debian,,install"#;
     broker.publish("c8y/s/ds", smartrest).await.unwrap();
     publish_a_fake_jwt_token(broker).await;
 
@@ -325,7 +325,7 @@ async fn mapper_publishes_software_update_request_with_wrong_action() {
     let cfg_dir = TempTedgeDir::new();
     let (_tmp_dir, _sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
     // Prepare and publish a c8y_SoftwareUpdate smartrest request on `c8y/s/ds` that contains a wrong action `remove`, that is not known by c8y.
-    let smartrest = r#"528,external_id,nodered,1.0.0::debian,,remove"#;
+    let smartrest = r#"528,test-device,nodered,1.0.0::debian,,remove"#;
     broker.publish("c8y/s/ds", smartrest).await.unwrap();
 
     // Expect a 501 (executing) followed by a 502 (failed)
@@ -1314,12 +1314,17 @@ async fn mapper_updating_the_default_inventory_fragments() {
     let (_tmp_dir, sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
 
     publish_a_fake_jwt_token(broker).await;
-    let expected_fragment_content = r#"{
-        "c8y_Agent": {
+
+    let version = env!("CARGO_PKG_VERSION");
+
+    let expected_fragment_content = &format!(
+        r#"{{
+        "c8y_Agent": {{
             "name": "thin-edge.io",
             "url": "https://thin-edge.io",
-            "version": "0.0.0"
-        }"#;
+            "version": "{version}"
+        }}"#
+    );
 
     mqtt_tests::assert_received_all_expected(
         &mut inventory_message,
@@ -1338,18 +1343,23 @@ async fn mapper_updating_the_inventory_fragments_from_file() {
     // Verify the fragment message that is published
     let broker = mqtt_tests::test_mqtt_broker();
     let cfg_dir = TempTedgeDir::new();
-    let content = r#"{
-        "c8y_Agent": {
+
+    let version = env!("CARGO_PKG_VERSION");
+
+    let content = &format!(
+        r#"{{
+        "c8y_Agent": {{
             "name": "thin-edge.io",
             "url": "https://thin-edge.io",
-            "version": "0.0.0"
-        },
-        "c8y_Firmware": {
+            "version": "{version}"
+        }},
+        "c8y_Firmware": {{
             "name": "raspberrypi-bootloader",
             "url": "31aab9856861b1a587e2094690c2f6e272712cb1",
             "version": "1.20140107-1"
-        }
-    }"#;
+        }}
+    }}"#
+    );
     create_inventroy_json_file_with_content(&cfg_dir, content);
     let mut inventory_message = broker
         .messages_published_on("c8y/inventory/managedObjects/update/test-device")
