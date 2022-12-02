@@ -9,3 +9,6 @@ pub mod logging;
 
 #[cfg(feature = "fs-notify")]
 pub mod notify;
+
+#[cfg(feature = "tedge-derive")]
+pub mod tedge_derive;
