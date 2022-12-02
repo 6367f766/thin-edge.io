@@ -2814,8 +2814,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "tracing",
  "url",
  "which",
+]
+
+[[package]]
+name = "tedge-derive"
+version = "0.1.0"
+dependencies = [
+ "quote 1.0.21",
+ "serde",
+ "syn 1.0.102",
+ "toml",
 ]
 
 [[package]]
@@ -2898,6 +2909,7 @@ dependencies = [
  "test-case",
  "thiserror",
  "toml",
+ "tracing",
  "url",
 ]
 
@@ -2971,6 +2983,7 @@ dependencies = [
  "nix",
  "notify",
  "strum_macros",
+ "tedge-derive",
  "tedge_test_utils",
  "tempfile",
  "thiserror",
