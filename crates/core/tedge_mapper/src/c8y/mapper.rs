@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::RwLock,
+};
 
 use crate::{
     c8y::converter::CumulocityConverter,
@@ -16,6 +19,8 @@ use tedge_config::{
 };
 use tedge_utils::file::*;
 use tracing::{info, info_span, Instrument};
+
+use super::converter::CHILD_DEVICE_MANAGER;
 
 const CUMULOCITY_MAPPER_NAME: &str = "tedge-mapper-c8y";
 const MQTT_MESSAGE_SIZE_THRESHOLD: usize = 16184;
@@ -62,6 +67,9 @@ impl TEdgeComponent for CumulocityMapper {
 
         let operations = Operations::try_new(format!("{config_dir}/operations/c8y"))?;
         let child_ops = Operations::get_child_ops(format!("{config_dir}/operations/c8y"))?;
+
+        CHILD_DEVICE_MANAGER.set(RwLock::new(child_ops));
+
         let mut http_proxy = JwtAuthHttpProxy::try_new(&tedge_config).await?;
         http_proxy.init().await?;
         let device_name = tedge_config.query(DeviceIdSetting)?;
@@ -76,7 +84,6 @@ impl TEdgeComponent for CumulocityMapper {
             operations,
             http_proxy,
             cfg_dir,
-            child_ops,
         )?);
 
         let mut mapper = create_mapper(

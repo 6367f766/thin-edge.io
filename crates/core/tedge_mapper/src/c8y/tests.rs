@@ -1,6 +1,9 @@
-use crate::core::{
-    converter::Converter, error::ConversionError, mapper::create_mapper,
-    size_threshold::SizeThreshold,
+use crate::{
+    c8y::converter::{Children, CHILD_DEVICE_MANAGER},
+    core::{
+        converter::Converter, error::ConversionError, mapper::create_mapper,
+        size_threshold::SizeThreshold,
+    },
 };
 use anyhow::Result;
 use assert_json_diff::assert_json_include;
@@ -20,7 +23,7 @@ use mqtt_tests::test_mqtt_server::MqttProcessHandler;
 use mqtt_tests::with_timeout::WithTimeout;
 use serde_json::json;
 use serial_test::serial;
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::RwLock, time::Duration};
 use tedge_test_utils::fs::TempTedgeDir;
 use test_case::test_case;
 use tokio::task::JoinHandle;
@@ -441,6 +444,8 @@ async fn c8y_mapper_syncs_pending_alarms_on_startup() {
 
     let mut messages = broker.messages_published_on("c8y/s/us").await;
     let cfg_dir = TempTedgeDir::new();
+
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
     // Start the C8Y Mapper
     let (_tmp_dir, sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
 
@@ -533,6 +538,7 @@ async fn c8y_mapper_syncs_pending_child_alarms_on_startup() {
         .messages_published_on("c8y/s/us/external_sensor")
         .await;
 
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
     // Start the C8Y Mapper
     let cfg_dir = TempTedgeDir::new();
     let (_tmp_dir, sm_mapper) = start_c8y_mapper(broker.port, &cfg_dir).await.unwrap();
@@ -741,6 +747,7 @@ async fn test_sync_child_alarms() {
 #[serial]
 async fn convert_thin_edge_json_with_child_id() {
     let cfg_dir = TempTedgeDir::new();
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
     let (_temp_dir, mut converter) = create_c8y_converter(&cfg_dir);
 
     let in_topic = "tedge/measurements/child1";
@@ -775,6 +782,7 @@ async fn convert_thin_edge_json_with_child_id() {
 #[serial]
 async fn convert_first_thin_edge_json_invalid_then_valid_with_child_id() {
     let cfg_dir = TempTedgeDir::new();
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
     let (_temp_dir, mut converter) = create_c8y_converter(&cfg_dir);
 
     let in_topic = "tedge/measurements/child1";
@@ -811,6 +819,7 @@ async fn convert_first_thin_edge_json_invalid_then_valid_with_child_id() {
 #[serial]
 async fn convert_two_thin_edge_json_messages_given_different_child_id() {
     let cfg_dir = TempTedgeDir::new();
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
     let (_temp_dir, mut converter) = create_c8y_converter(&cfg_dir);
     let in_payload = r#"{"temp": 1, "time": "2021-11-16T17:45:40.571760714+01:00"}"#;
 

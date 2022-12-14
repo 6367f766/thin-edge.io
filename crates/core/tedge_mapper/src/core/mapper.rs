@@ -1,19 +1,24 @@
 use crate::c8y::dynamic_discovery::*;
 use crate::core::{converter::*, error::*};
-use c8y_api::smartrest::topic::SMARTREST_PUBLISH_TOPIC;
+use c8y_api::smartrest::{operations::Operations, topic::SMARTREST_PUBLISH_TOPIC};
 use mqtt_channel::{
     Connection, Message, MqttError, SinkExt, StreamExt, Topic, TopicFilter, UnboundedReceiver,
     UnboundedSender,
 };
+use state::Storage;
 
-use std::path::Path;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
+use std::{path::Path, sync::RwLock};
 use tedge_api::health::{health_check_topics, send_health_status};
 use tedge_utils::notify::{fs_notify_stream, FsEvent};
 
 use tracing::{error, info, instrument, warn};
 const SYNC_WINDOW: Duration = Duration::from_secs(3);
 use std::result::Result::Ok;
+
+// a singleton class to store a map of all (children, operations)
+type Children = HashMap<String, Operations>;
+pub static CHILD_DEVICE_MANAGER: Storage<RwLock<Children>> = Storage::new();
 
 pub async fn create_mapper(
     app_name: &str,
@@ -33,6 +38,8 @@ pub async fn create_mapper(
         Connection::new(&mqtt_config(app_name, &mqtt_host, mqtt_port, topic_filter)?).await?;
 
     Mapper::subscribe_errors(mqtt_client.errors);
+
+    CHILD_DEVICE_MANAGER.set(RwLock::new(Children::default()));
 
     Ok(Mapper::new(
         app_name.to_string(),

@@ -20,8 +20,9 @@ use c8y_api::{
 use logged_command::LoggedCommand;
 use mqtt_channel::{Message, Topic, TopicFilter};
 use plugin_sm::operation_logs::OperationLogs;
-use std::collections::HashMap;
+use state::Storage;
 use std::fs;
+use std::{collections::HashMap, sync::RwLock};
 use std::{
     fs::File,
     io::Read,
@@ -58,6 +59,10 @@ const TEDGE_AGENT_LOG_DIR: &str = "tedge/agent";
 
 const CREATE_EVENT_SMARTREST_CODE: u16 = 400;
 
+// a singleton class to store a map of all (children, operations)
+pub type Children = HashMap<String, Operations>;
+pub static CHILD_DEVICE_MANAGER: Storage<RwLock<Children>> = Storage::new();
+
 #[derive(Debug)]
 pub struct CumulocityConverter<Proxy>
 where
@@ -71,8 +76,7 @@ where
     pub operations: Operations,
     operation_logs: OperationLogs,
     http_proxy: Proxy,
-    cfg_dir: PathBuf,
-    pub children: HashMap<String, Operations>,
+    pub cfg_dir: PathBuf,
 }
 
 impl<Proxy> CumulocityConverter<Proxy>
@@ -86,7 +90,6 @@ where
         operations: Operations,
         http_proxy: Proxy,
         cfg_dir: &Path,
-        children: HashMap<String, Operations>,
     ) -> Result<Self, CumulocityMapperError> {
         let mut topic_filter: TopicFilter = vec![
             "tedge/measurements",
@@ -128,7 +131,6 @@ where
             operation_logs,
             http_proxy,
             cfg_dir: cfg_dir.to_path_buf(),
-            children,
         })
     }
 
@@ -171,7 +173,6 @@ where
         ));
 
         let operation_logs = OperationLogs::try_new(log_dir)?;
-        let children: HashMap<String, Operations> = HashMap::new();
 
         Ok(CumulocityConverter {
             size_threshold,
@@ -183,7 +184,6 @@ where
             operation_logs,
             http_proxy,
             cfg_dir,
-            children,
         })
     }
 
@@ -199,11 +199,7 @@ where
                 // Need to check if the input Thin Edge JSON is valid before adding a child ID to list
                 let c8y_json_child_payload =
                     json::from_thin_edge_json_with_child(input.payload_str()?, child_id.as_str())?;
-                add_external_device_registration_message(
-                    child_id,
-                    &mut self.children,
-                    &mut mqtt_messages,
-                );
+                add_external_device_registration_message(child_id, &mut mqtt_messages);
                 c8y_json_child_payload
             }
             None => json::from_thin_edge_json(input.payload_str()?)?,
@@ -234,7 +230,7 @@ where
         let tedge_event = ThinEdgeEvent::try_from(&input.topic.name, input.payload_str()?)?;
         let child_id = tedge_event.source.clone();
         let need_registration = if let Some(child_id) = child_id.clone() {
-            add_external_device_registration_message(child_id, &mut self.children, &mut messages)
+            add_external_device_registration_message(child_id, &mut messages)
         } else {
             false
         };
@@ -286,7 +282,6 @@ where
                     let child_id = topic_split[4];
                     add_external_device_registration_message(
                         child_id.to_string(),
-                        &mut self.children,
                         &mut mqtt_messages,
                     );
                 }
@@ -386,8 +381,7 @@ where
         let supported_operations_message = self.wrap_error(create_supported_operations(
             &self.cfg_dir.join("operations").join("c8y"),
         ));
-        let sops =
-            create_child_supported_operations_fragments_message(&mut self.children, &self.cfg_dir);
+        let sops = create_child_supported_operations_fragments_message(&self.cfg_dir);
         let mut supported_child_operations_message = self.wrap_errors(sops);
 
         let device_data_message = self.wrap_error(create_device_data_fragments(
@@ -426,8 +420,8 @@ where
                     Ok(Some(create_supported_operations(&message.ops_dir)?))
                 } else {
                     // operation for child
-                    let child_op = self
-                        .children
+                    let mut children = CHILD_DEVICE_MANAGER.get().write().unwrap(); // TODO FIX LATER
+                    let child_op = children
                         .entry(get_child_id(&message.ops_dir)?)
                         .or_insert_with(Operations::default);
 
@@ -575,7 +569,6 @@ fn create_supported_operations(path: &Path) -> Result<Message, ConversionError> 
 }
 
 fn create_child_supported_operations_fragments_message(
-    children: &mut HashMap<String, Operations>,
     cfg_dir: &Path,
 ) -> Result<Vec<Message>, ConversionError> {
     let mut mqtt_messages = Vec::new();
@@ -592,11 +585,7 @@ fn create_child_supported_operations_fragments_message(
         .collect::<Vec<PathBuf>>();
 
     for cdir in child_entries {
-        supported_ops_and_register_device_message_for_child_device(
-            cdir,
-            children,
-            &mut mqtt_messages,
-        )?;
+        supported_ops_and_register_device_message_for_child_device(cdir, &mut mqtt_messages)?;
     }
     Ok(mqtt_messages)
 }
@@ -605,14 +594,13 @@ fn create_child_supported_operations_fragments_message(
 // If not create the child creation message and then the operations message.
 fn supported_ops_and_register_device_message_for_child_device(
     cdir: PathBuf,
-    children: &mut HashMap<String, Operations>,
     mqtt_messages: &mut Vec<Message>,
 ) -> Result<(), ConversionError> {
     let ops = Operations::try_new(cdir.clone())?;
     let ops_msg = ops.create_smartrest_ops_message()?;
     if let Some(id) = cdir.file_name() {
         if let Some(child_id) = id.to_str() {
-            add_external_device_registration_message(child_id.to_string(), children, mqtt_messages);
+            add_external_device_registration_message(child_id.to_string(), mqtt_messages);
             let topic_str = format!("{SMARTREST_PUBLISH_TOPIC}/{}", child_id);
             let topic = Topic::new_unchecked(&topic_str);
             mqtt_messages.push(Message::new(&topic, ops_msg));
@@ -623,9 +611,9 @@ fn supported_ops_and_register_device_message_for_child_device(
 
 fn add_external_device_registration_message(
     child_id: String,
-    children: &mut HashMap<String, Operations>,
     mqtt_messages: &mut Vec<Message>,
 ) -> bool {
+    let mut children = CHILD_DEVICE_MANAGER.get().write().unwrap(); // TODO deal with unwrap
     if !children.contains_key(&child_id) {
         children.insert(child_id.to_string(), Operations::default());
         mqtt_messages.push(Message::new(
