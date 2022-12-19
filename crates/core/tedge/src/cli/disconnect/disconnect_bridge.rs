@@ -75,7 +75,9 @@ impl DisconnectBridgeCommand {
         }
 
         // Ignore failure
-        let _ = self.apply_changes_to_mosquitto();
+        let _ = self
+            .service_manager()
+            .apply_changes_to_mosquitto(&self.cloud.to_string());
 
         let mut failed = false;
         // Only C8Y changes the status of tedge-mapper
@@ -123,19 +125,5 @@ impl DisconnectBridgeCommand {
                 bridge_conf_path,
             )),
         }
-    }
-
-    // Deviation from specification:
-    // Check if mosquitto is running, restart only if it was active before, if not don't do anything.
-    fn apply_changes_to_mosquitto(&self) -> Result<(), DisconnectBridgeError> {
-        println!("Applying changes to mosquitto.\n");
-
-        if self
-            .service_manager()
-            .restart_service_if_running(SystemService::Mosquitto)?
-        {
-            println!("{} Bridge successfully disconnected!\n", self.cloud);
-        }
-        Ok(())
     }
 }

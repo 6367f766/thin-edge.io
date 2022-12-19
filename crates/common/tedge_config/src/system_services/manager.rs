@@ -39,6 +39,17 @@ pub trait SystemServiceManager: Debug {
             Ok(false)
         }
     }
+
+    // Deviation from specification:
+    // Check if mosquitto is running, restart only if it was active before, if not don't do anything.
+    fn apply_changes_to_mosquitto(&self, cloud: &str) -> Result<(), SystemServiceError> {
+        println!("Applying changes to mosquitto.\n");
+
+        if self.restart_service_if_running(SystemService::Mosquitto)? {
+            println!("{} Bridge successfully disconnected!\n", cloud);
+        }
+        Ok(())
+    }
 }
 
 pub fn service_manager(
